@@ -9,7 +9,7 @@ description = "Automated ML data preparation and augmentation pipeline"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
-    {name = "Your Name", email = "your@email.com"}
+    {name = "Ksenia Zavyalova"}
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -21,40 +21,82 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Text Processing",
 ]
-keywords = ["machine-learning", "data-preparation", "automl", "preprocessing"]
+keywords = ["machine-learning", "data-preparation", "automl", "preprocessing", "augmentation", "nlp", "computer-vision"]
 requires-python = ">=3.10"
+
+# Базовые зависимости (Core)
 dependencies = [
     "pandas>=2.0.0",
     "numpy>=1.24.0",
+    "scipy>=1.10.0",
+    "tqdm>=4.60.0", 
 ]
 
 [project.optional-dependencies]
-full = [
-    "ydata-profiling>=4.0.0",
-    "great-expectations>=0.18.0",
+# Зависимости для табличных данных
+tabular = [
     "scikit-learn>=1.3.0",
     "category-encoders>=2.6.0",
     "pyod>=1.1.0",
     "imbalanced-learn>=0.11.0",
-    "featuretools>=1.28.0",
-    "optuna>=3.4.0",
+    "ydata-profiling>=4.0.0",
 ]
+
+# Зависимости для обработки текста
+text = [
+    "nltk>=3.8.0",
+    "transformers>=4.30.0",
+    "torch>=2.0.0",
+]
+
+# Зависимости для обработки изображений
+image = [
+    "opencv-python>=4.8.0",
+    "albumentations>=1.3.0",
+    "torchvision>=0.15.0",
+    "Pillow>=10.0.0",
+]
+
+# Полный набор 
+full = [
+    "scikit-learn>=1.3.0",
+    "category-encoders>=2.6.0",
+    "pyod>=1.1.0",
+    "imbalanced-learn>=0.11.0",
+    "ydata-profiling>=4.0.0",
+    "nltk>=3.8.0",
+    "transformers>=4.30.0",
+    "torch>=2.0.0",
+    "opencv-python>=4.8.0",
+    "albumentations>=1.3.0",
+    "torchvision>=0.15.0",
+    "Pillow>=10.0.0",
+]
+
+# Зависимости для разработки и тестов
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "black>=23.0.0",
     "mypy>=1.0.0",
+    "types-tqdm",
+    "types-setuptools",
 ]
 
 [project.urls]
 Homepage = "https://github.com/KsuZavyalova/automl-data"
-Documentation = "https://automl-data.readthedocs.io"
 Repository = "https://github.com/KsuZavyalova/automl-data"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = "test_*.py"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+]
 addopts = "-v --cov=automl_data --cov-report=term-missing"
 
 [tool.black]
@@ -65,3 +107,4 @@ target-version = ['py310', 'py311', 'py312']
 python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
+ignore_missing_imports = true
