@@ -31,7 +31,11 @@ class ProcessingStage(Enum):
     PROFILED = auto()
     VALIDATED = auto()
     CLEANED = auto()
+    IMPUTED = auto()       
+    SCALED = auto()        
+    ENCODED = auto()       
     AUGMENTED = auto()
+    BALANCED = auto()      
     TRANSFORMED = auto()
     READY = auto()
     
@@ -110,21 +114,22 @@ class DataContainer:
     
     # Кэш для аугментированных данных
     _augmented_cache: dict[str, Any] = field(default_factory=dict, repr=False)
+    _force_recompute: bool = field(default=False, repr=False)
+    _computed_properties: dict[str, Any] = field(default_factory=dict, repr=False)
+    
+    # Порог дисбаланса 
+    imbalance_threshold: float = 0.3
     
     def __post_init__(self) -> None:
         """Валидация и автоопределение типа"""
         if not isinstance(self.data, pd.DataFrame):
             raise TypeError(f"data must be DataFrame, got {type(self.data).__name__}")
         
-        # Автоопределение типа данных
         if self.data_type == DataType.TABULAR:
             self.data_type = self._infer_data_type()
         
-        # Конвертация путей
         if self.image_dir and isinstance(self.image_dir, str):
             self.image_dir = Path(self.image_dir)
-    
-    # ==================== ПЕРЕГРУЗКА ОПЕРАТОРОВ ====================
     
     def __len__(self) -> int:
         return len(self.data)
@@ -168,8 +173,6 @@ class DataContainer:
             f"stage={self.stage.name}, quality={self.quality_score:.0%})"
         )
     
-    # ==================== PROPERTIES ====================
-    
     @property
     def shape(self) -> tuple[int, int]:
         return self.data.shape
@@ -180,24 +183,37 @@ class DataContainer:
     
     @property
     def numeric_columns(self) -> list[str]:
-        return self.data.select_dtypes(include=[np.number]).columns.tolist()
+        if self._force_recompute or '_numeric_columns_cache' not in self._computed_properties:
+            self._computed_properties['_numeric_columns_cache'] = self.data.select_dtypes(
+                include=[np.number]
+            ).columns.tolist()
+        return self._computed_properties['_numeric_columns_cache']
     
     @property
     def categorical_columns(self) -> list[str]:
-        return self.data.select_dtypes(include=['object', 'category']).columns.tolist()
+        if self._force_recompute or '_categorical_columns_cache' not in self._computed_properties:
+            self._computed_properties['_categorical_columns_cache'] = self.data.select_dtypes(
+                include=['object', 'category']
+            ).columns.tolist()
+        return self._computed_properties['_categorical_columns_cache']
     
     @property
     def X(self) -> pd.DataFrame:
         """Признаки (без target)"""
-        cols_to_drop = [c for c in [self.target_column] if c and c in self.data.columns]
-        return self.data.drop(columns=cols_to_drop)
+        if self._force_recompute or '_X_cache' not in self._computed_properties:
+            cols_to_drop = [c for c in [self.target_column] if c and c in self.data.columns]
+            self._computed_properties['_X_cache'] = self.data.drop(columns=cols_to_drop)
+        return self._computed_properties['_X_cache']
     
     @property
     def y(self) -> pd.Series | None:
         """Целевая переменная"""
-        if self.target_column and self.target_column in self.data.columns:
-            return self.data[self.target_column]
-        return None
+        if self._force_recompute or '_y_cache' not in self._computed_properties:
+            if self.target_column and self.target_column in self.data.columns:
+                self._computed_properties['_y_cache'] = self.data[self.target_column]
+            else:
+                self._computed_properties['_y_cache'] = None
+        return self._computed_properties['_y_cache']
     
     @property
     def texts(self) -> pd.Series | None:
@@ -235,8 +251,6 @@ class DataContainer:
             return self.y.value_counts().to_dict()
         return None
     
-    imbalance_threshold: float = 0.3
-    
     @property
     def is_imbalanced(self) -> bool:
         """Проверка на дисбаланс классов с учетом порога"""
@@ -246,8 +260,6 @@ class DataContainer:
                 ratio = min(counts) / max(counts)
                 return ratio < self.imbalance_threshold
         return False
-    
-    # ==================== МЕТОДЫ ====================
     
     def clone(self) -> Self:
         """Глубокая копия"""
@@ -264,7 +276,8 @@ class DataContainer:
             processing_history=copy.deepcopy(self.processing_history),
             profile=copy.deepcopy(self.profile),
             quality_score=self.quality_score,
-            recommendations=copy.deepcopy(self.recommendations)
+            recommendations=copy.deepcopy(self.recommendations),
+            imbalance_threshold=self.imbalance_threshold
         )
     
     def add_step(self, step: ProcessingStep) -> None:
@@ -351,20 +364,18 @@ class DataContainer:
             image_dir=self.image_dir,
             data_type=self.data_type,
             stage=self.stage,
-            source=self.source
+            source=self.source,
+            imbalance_threshold=self.imbalance_threshold
         )
     
     def _infer_data_type(self) -> DataType:
         """Автоопределение типа данных"""
-        # Явно указан текст
         if self.text_column:
             return DataType.TEXT
         
-        # Явно указаны изображения
         if self.image_column:
             return DataType.IMAGE
         
-        # Проверяем на длинные тексты
         for col in self.categorical_columns[:5]:
             try:
                 avg_len = self.data[col].dropna().astype(str).str.len().mean()
@@ -374,7 +385,6 @@ class DataContainer:
             except:
                 pass
         
-        # Проверяем на пути к файлам
         for col in self.categorical_columns[:5]:
             try:
                 sample = self.data[col].dropna().iloc[0]
@@ -392,22 +402,9 @@ class DataContainer:
     def _sync_internal_state(self):
         """
         Синхронизирует все кэшированные свойства после изменения данных.
-        КРИТИЧЕСКИ ВАЖНО вызывать после ЛЮБОГО изменения container.data!
+        Важно вызывать после любого изменения container.data!
         """
-        # Удаляем все кэши
-        cache_attrs = [
-            '_X_cache', '_y_cache', '_numeric_columns_cache',
-            '_categorical_columns_cache', '_text_columns_cache',
-            '_image_columns_cache', '_quality_score_cache',
-            '_processing_history_cache', '_profile_cache'
-        ]
-        
-        for attr in cache_attrs:
-            if hasattr(self, attr):
-                delattr(self, attr)
-        
-        # Форсируем пересчет при следующем обращении
+        self._computed_properties.clear()
         self._force_recompute = True
         
-        # Также сбрасываем любые другие вычисленные свойства
-        self._computed_properties = {}
+        self._augmented_cache.clear()

@@ -17,32 +17,14 @@ import logging
 import time
 
 from ..core.container import DataContainer, ProcessingStep, ProcessingStage
-from ..utils.decorators import timing, require_fitted
+from ..utils.decorators import timing_method, require_fitted
 
 T = TypeVar('T')
-
-
-@dataclass
-class AdapterResult:
-    """Результат работы адаптера"""
-    success: bool
-    message: str = ""
-    details: dict[str, Any] = None
-    duration: float = 0.0
-    
-    def __post_init__(self):
-        if self.details is None:
-            self.details = {}
-
 
 class BaseAdapter(ABC):
     """
     Абстрактный базовый класс для всех адаптеров.
-    
-    Использует паттерн Template Method:
-    - fit() вызывает _fit_impl()
-    - transform() вызывает _transform_impl()
-    
+        
     Все адаптеры должны реализовать _fit_impl и _transform_impl.
     
     Example:
@@ -79,8 +61,6 @@ class BaseAdapter(ABC):
         """Информация об обучении"""
         return self._fit_info.copy()
     
-    # ==================== ABSTRACT METHODS ====================
-    
     @abstractmethod
     def _fit_impl(self, container: DataContainer) -> None:
         """
@@ -97,8 +77,7 @@ class BaseAdapter(ABC):
         """
         pass
     
-    # ==================== TEMPLATE METHODS ====================
-    
+    @timing_method('_last_duration')
     def fit(self, container: DataContainer) -> BaseAdapter:
         """
         Template Method для обучения.
@@ -112,21 +91,19 @@ class BaseAdapter(ABC):
         Args:
             container: DataContainer с данными
         
-        Returns:
+        Returns:ф
             self (для цепочки вызовов)
         """
-        start = time.perf_counter()
         
         self._validate_input(container)
         self._pre_fit(container)
         self._fit_impl(container)
         self._post_fit(container)
         self._is_fitted = True
-        
-        self._last_duration = time.perf_counter() - start
-        
+         
         return self
     
+    @require_fitted
     def transform(self, container: DataContainer) -> DataContainer:
         """
         Template Method для трансформации.
@@ -142,13 +119,6 @@ class BaseAdapter(ABC):
         Returns:
             Трансформированный DataContainer
         """
-        if not self._is_fitted:
-            from ..utils.exceptions import NotFittedError
-            raise NotFittedError(
-                f"{self._name} is not fitted. Call fit() first.",
-                component=self._name
-            )
-        
         start = time.perf_counter()
         
         self._validate_input(container)
@@ -171,8 +141,6 @@ class BaseAdapter(ABC):
         """
         self.fit(container)
         return self.transform(container)
-    
-    # ==================== HOOKS ====================
     
     def _validate_input(self, container: DataContainer) -> None:
         """
@@ -212,8 +180,6 @@ class BaseAdapter(ABC):
             duration_seconds=duration
         )
         container.add_step(step)
-    
-    # ==================== UTILITY METHODS ====================
     
     def get_params(self) -> dict[str, Any]:
         """Получить параметры адаптера"""
@@ -277,97 +243,3 @@ class TransformOnlyAdapter(BaseAdapter):
         """Просто transform, fit не нужен"""
         self._is_fitted = True
         return self.transform(container)
-
-
-class CompositeAdapter(BaseAdapter):
-    """
-    Композитный адаптер (паттерн Composite).
-    Объединяет несколько адаптеров в последовательность.
-    
-    Example:
-        >>> composite = CompositeAdapter()
-        >>> composite.add(EncodingAdapter())
-        >>> result = composite.fit_transform(container)
-    """
-    
-    def __init__(self, adapters: list[BaseAdapter] | None = None, **config):
-        super().__init__(name="CompositeAdapter", **config)
-        self._adapters: list[BaseAdapter] = adapters or []
-    
-    def add(self, adapter: BaseAdapter) -> CompositeAdapter:
-        """
-        Добавить адаптер (fluent API).
-        
-        Args:
-            adapter: Адаптер для добавления
-        
-        Returns:
-            self (для цепочки вызовов)
-        """
-        self._adapters.append(adapter)
-        return self
-    
-    def _fit_impl(self, container: DataContainer) -> None:
-        """Обучение всех вложенных адаптеров"""
-        current = container
-        for adapter in self._adapters:
-            adapter.fit(current)
-            # Трансформируем для следующего адаптера
-            current = adapter.transform(current)
-    
-    def _transform_impl(self, container: DataContainer) -> DataContainer:
-        """Последовательное применение всех адаптеров"""
-        current = container
-        for adapter in self._adapters:
-            current = adapter.transform(current)
-        return current
-    
-    def __len__(self) -> int:
-        return len(self._adapters)
-    
-    def __iter__(self):
-        return iter(self._adapters)
-    
-    def __getitem__(self, index: int) -> BaseAdapter:
-        return self._adapters[index]
-
-
-class ConditionalAdapter(BaseAdapter):
-    """
-    Адаптер с условным выполнением.
-    
-    Выполняет внутренний адаптер только если условие True.
-    
-    Example:
-        >>> adapter = ConditionalAdapter(
-        ...     adapter=BalancingAdapter(),
-        ...     condition=lambda c: c.is_imbalanced
-        ... )
-    """
-    
-    def __init__(
-        self, 
-        adapter: BaseAdapter,
-        condition: callable,
-        **config
-    ):
-        super().__init__(name=f"Conditional({adapter.name})", **config)
-        self._adapter = adapter
-        self._condition = condition
-        self._condition_met = False
-    
-    def _fit_impl(self, container: DataContainer) -> None:
-        self._condition_met = self._condition(container)
-        if self._condition_met:
-            self._adapter.fit(container)
-    
-    def _transform_impl(self, container: DataContainer) -> DataContainer:
-        if self._condition_met:
-            return self._adapter.transform(container)
-        return container
-    
-    def get_params(self) -> dict[str, Any]:
-        params = super().get_params()
-        params["condition_met"] = self._condition_met
-        params["inner_adapter"] = self._adapter.get_params()
-        return params

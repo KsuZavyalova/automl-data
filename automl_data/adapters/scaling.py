@@ -46,6 +46,7 @@ class ScalingAdapter(BaseAdapter):
         self._scaler = None
         self._numeric_cols: list[str] = []
         self._fit_info: dict = {}
+        self._actual_strategy = None  
     
     def _fit_impl(self, container: DataContainer) -> None:
         require_package("sklearn", "scikit-learn")
@@ -55,51 +56,51 @@ class ScalingAdapter(BaseAdapter):
         df = container.data
         self._numeric_cols = container.numeric_columns.copy()
         
-        # Исключаем target
         target_col = container.target_column
         if target_col and target_col in self._numeric_cols:
             self._numeric_cols.remove(target_col)
         
         if not self._numeric_cols or self.strategy == "none":
+            self._actual_strategy = "none"
             return
         
-        # Проверяем наличие выбросов
         has_outliers = self._check_outliers(df)
         
-        # Автовыбор стратегии
         if self.strategy == "auto":
-            self.strategy = "robust" if has_outliers else "standard"
+            self._actual_strategy = "robust" if has_outliers else "standard" 
+        else:
+            self._actual_strategy = self.strategy 
         
-        # Создание и обучение скейлера
-        if self.strategy == "standard":
+        if self._actual_strategy == "standard":
             self._scaler = StandardScaler(
                 with_mean=self.with_mean,
                 with_std=self.with_std
             )
         
-        elif self.strategy == "robust":
+        elif self._actual_strategy == "robust":
             self._scaler = RobustScaler(
                 with_centering=self.with_mean,
                 with_scaling=self.with_std,
                 quantile_range=self.quantile_range
             )
         
-        elif self.strategy == "minmax":
+        elif self._actual_strategy == "minmax":
             self._scaler = MinMaxScaler()
         
         if self._scaler:
             self._scaler.fit(df[self._numeric_cols])
             
             self._fit_info.update({
-                "strategy": self.strategy,
+                "strategy": self._actual_strategy,
                 "has_outliers": has_outliers,
                 "scaler_class": self._scaler.__class__.__name__,
-                "numeric_cols_count": len(self._numeric_cols)
+                "numeric_cols_count": len(self._numeric_cols),
+                "columns_count": len(self._numeric_cols) 
             })
     
     def _check_outliers(self, df: pd.DataFrame, threshold: float = 0.05) -> bool:
         """Проверка на выбросы методом IQR"""
-        for col in self._numeric_cols[:15]:  # Проверяем первые 15 числовых колонок
+        for col in self._numeric_cols[:15]: 
             if col not in df.columns:
                 continue
             
@@ -127,7 +128,6 @@ class ScalingAdapter(BaseAdapter):
         if not self._scaler or not self._numeric_cols:
             return container
         
-        # Сохраняем target
         target_col = container.target_column
         original_target = None
         if target_col and target_col in container.data.columns:
@@ -140,22 +140,28 @@ class ScalingAdapter(BaseAdapter):
         if existing_cols:
             df[existing_cols] = self._scaler.transform(df[existing_cols])
         
-        # Восстанавливаем target
         if original_target is not None and target_col in df.columns:
             if not np.array_equal(df[target_col].values, original_target.values):
                 df[target_col] = original_target.values
         
-        # Обновляем контейнер
         container.data = df
         container._sync_internal_state()
-        container.stage = ProcessingStage.SCALED
         
-        # Добавляем рекомендации
+        try:
+            container.stage = ProcessingStage.SCALED
+        except AttributeError:
+            if hasattr(ProcessingStage, 'SCALED'):
+                container.stage = ProcessingStage.SCALED
+            elif hasattr(ProcessingStage, 'TRANSFORMED'):
+                container.stage = ProcessingStage.TRANSFORMED
+            else:
+                container.stage = "SCALED"
+        
         container.recommendations.append({
             "type": "scaling",
-            "strategy": self.strategy,
+            "strategy": self._actual_strategy,
             "scaler_class": self._scaler.__class__.__name__,
-            "message": f"Applied {self.strategy} scaling"
+            "message": f"Applied {self._actual_strategy} scaling"
         })
         
         return container

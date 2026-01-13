@@ -57,7 +57,6 @@ class TextAugmentor(BaseAdapter):
     >>> container = augmentor.fit_transform(container)
     """
     
-    # Английские стоп-слова (не заменяем синонимами)
     STOPWORDS: Set[str] = {
         'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your',
         'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she',
@@ -75,7 +74,6 @@ class TextAugmentor(BaseAdapter):
         'now'
     }
     
-    # Местоимения и их возможные замены
     PRONOUN_REPLACEMENTS: Dict[str, List[str]] = {
         'he': ['the man', 'the person', 'the individual', 'the guy'],
         'she': ['the woman', 'the person', 'the individual', 'the lady'],
@@ -110,12 +108,10 @@ class TextAugmentor(BaseAdapter):
         random.seed(random_state)
         np.random.seed(random_state)
         
-        # Инициализация моделей (ленивая)
         self._wordnet_initialized = False
         self._t5_model = None
         self._t5_tokenizer = None
         
-        # Доступные методы
         self._methods: Dict[str, Callable[[str], str]] = {}
         self._available_methods: List[str] = []
     
@@ -211,7 +207,6 @@ class TextAugmentor(BaseAdapter):
         df = container.data
         target_col = container.target_column
         
-        # Анализ классов если есть target
         class_counts = {}
         if target_col and target_col in df.columns:
             class_counts = df[target_col].value_counts().to_dict()
@@ -255,7 +250,7 @@ class TextAugmentor(BaseAdapter):
         new_size = len(container.data)
         logger.info(f"Augmentation complete: {original_size} -> {new_size} samples")
         
-        container.add_recommendation({
+        container.recommendations.append({
             "type": "augmentation",
             "original_size": original_size,
             "new_size": new_size,
@@ -358,7 +353,6 @@ class TextAugmentor(BaseAdapter):
             
             idx_cycle += 1
             
-            # Защита от бесконечного цикла
             if idx_cycle > len(indices) * 10:
                 logger.warning("Augmentation cycle limit reached")
                 break
@@ -374,7 +368,6 @@ class TextAugmentor(BaseAdapter):
         if not text or len(text.split()) < 3:
             return text
         
-        # Выбираем случайный метод
         method_name = random.choice(self._available_methods)
         method = self._methods[method_name]
         
@@ -384,7 +377,6 @@ class TextAugmentor(BaseAdapter):
             logger.debug(f"Augmentation failed with {method_name}: {e}")
             return text
     
-    # ==================== EDA Methods ====================
     
     def _augment_eda(self, text: str) -> str:
         """
@@ -400,7 +392,6 @@ class TextAugmentor(BaseAdapter):
         if len(words) < 3:
             return text
         
-        # Выбираем случайный метод EDA
         methods = [
             (self._eda_synonym_replacement, self.config.eda_alpha_sr),
             (self._eda_random_insertion, self.config.eda_alpha_ri),
@@ -418,7 +409,6 @@ class TextAugmentor(BaseAdapter):
         """Замена n случайных слов синонимами"""
         new_words = words.copy()
         
-        # Находим слова которые можно заменить
         replaceable = [i for i, w in enumerate(words) 
                       if w.lower() not in self.STOPWORDS and w.isalpha()]
         
@@ -439,7 +429,6 @@ class TextAugmentor(BaseAdapter):
         new_words = words.copy()
         
         for _ in range(n):
-            # Выбираем случайное слово
             candidates = [w for w in words if w.lower() not in self.STOPWORDS and w.isalpha()]
             if not candidates:
                 break
@@ -473,7 +462,6 @@ class TextAugmentor(BaseAdapter):
         
         new_words = words.copy()
         
-        # Удаляем n случайных слов
         delete_indices = random.sample(range(len(new_words)), min(n, len(new_words) - 1))
         delete_indices.sort(reverse=True)
         
@@ -496,8 +484,8 @@ class TextAugmentor(BaseAdapter):
                 return None
             
             synonyms = set()
-            for syn in synsets[:3]:  # Берём первые 3 synset
-                for lemma in syn.lemmas()[:5]:  # Первые 5 лемм
+            for syn in synsets[:3]: 
+                for lemma in syn.lemmas()[:5]:  
                     synonym = lemma.name().replace('_', ' ')
                     if synonym.lower() != word.lower():
                         synonyms.add(synonym)
@@ -510,8 +498,6 @@ class TextAugmentor(BaseAdapter):
         except Exception:
             return None
     
-    # ==================== Synonym WordNet ====================
-    
     def _augment_synonym_wordnet(self, text: str) -> str:
         """Замена нескольких слов синонимами из WordNet"""
         words = text.split()
@@ -523,7 +509,6 @@ class TextAugmentor(BaseAdapter):
         
         return ' '.join(new_words)
     
-    # ==================== T5 Paraphrase ====================
     
     def _augment_t5_paraphrase(self, text: str) -> str:
         """Перефразирование через T5"""
@@ -536,7 +521,6 @@ class TextAugmentor(BaseAdapter):
             # Формируем промпт
             input_text = f"paraphrase: {text}"
             
-            # Токенизация
             inputs = self._t5_tokenizer.encode(
                 input_text,
                 return_tensors="pt",
@@ -547,7 +531,6 @@ class TextAugmentor(BaseAdapter):
             if torch.cuda.is_available():
                 inputs = inputs.cuda()
             
-            # Генерация
             with torch.no_grad():
                 outputs = self._t5_model.generate(
                     inputs,
@@ -558,10 +541,8 @@ class TextAugmentor(BaseAdapter):
                     do_sample=True
                 )
             
-            # Декодирование
             paraphrase = self._t5_tokenizer.decode(outputs[0], skip_special_tokens=True)
             
-            # Проверяем что результат отличается
             if paraphrase and paraphrase.lower() != text.lower():
                 return paraphrase
             
@@ -571,7 +552,6 @@ class TextAugmentor(BaseAdapter):
             logger.debug(f"T5 paraphrase failed: {e}")
             return text
     
-    # ==================== Pronoun to Noun ====================
     
     def _augment_pronoun_to_noun(self, text: str) -> str:
         """Замена местоимений на существительные"""
@@ -583,10 +563,8 @@ class TextAugmentor(BaseAdapter):
             lower_word = word.lower()
             
             if lower_word in self.PRONOUN_REPLACEMENTS:
-                # Случайно выбираем замену
                 replacement = random.choice(self.PRONOUN_REPLACEMENTS[lower_word])
                 
-                # Сохраняем регистр первой буквы
                 if word[0].isupper():
                     replacement = replacement.capitalize()
                 

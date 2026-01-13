@@ -56,7 +56,6 @@ class TextPreprocessor(BaseAdapter):
     PUNCTUATION_PATTERN = re.compile(r'[^\w\s]')
     NUMBERS_PATTERN = re.compile(r'\d+')
     
-    # Английские стоп-слова (базовый набор)
     ENGLISH_STOPWORDS = {
         'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', "you're",
         "you've", "you'll", "you'd", 'your', 'yours', 'yourself', 'yourselves', 'he',
@@ -90,7 +89,6 @@ class TextPreprocessor(BaseAdapter):
         self.config = config or TextConfig(preprocessing_level=preprocessing_level)
         self.preprocessing_level = self.config.preprocessing_level
         
-        # Инициализируем лемматизатор лениво
         self._lemmatizer = None
         self._nltk_initialized = False
     
@@ -102,7 +100,6 @@ class TextPreprocessor(BaseAdapter):
         try:
             import nltk
             
-            # Скачиваем необходимые данные
             for resource in ['wordnet', 'averaged_perceptron_tagger', 'punkt']:
                 try:
                     nltk.data.find(f'corpora/{resource}' if resource == 'wordnet' 
@@ -150,11 +147,7 @@ class TextPreprocessor(BaseAdapter):
         english_count = sum(1 for w in words if w in english_words)
         english_ratio = english_count / max(len(words), 1)
         
-        # Также проверяем на кириллицу
-        cyrillic_pattern = re.compile(r'[а-яА-ЯёЁ]')
-        has_cyrillic = bool(cyrillic_pattern.search(text[:500]))
-        
-        if has_cyrillic or english_ratio < 0.1:
+        if english_ratio < 0.1:
             return "non-english"
         
         return "en"
@@ -185,10 +178,8 @@ class TextPreprocessor(BaseAdapter):
         
         texts = container.data[container.text_column].dropna()
         
-        # Проверяем язык
         self._validate_language(texts)
         
-        # Собираем статистику
         lengths = texts.str.len()
         word_counts = texts.str.split().str.len()
         
@@ -216,10 +207,8 @@ class TextPreprocessor(BaseAdapter):
         
         original_count = len(df)
         
-        # Применяем предобработку
         df[text_col] = df[text_col].apply(self._preprocess_text)
         
-        # Фильтруем пустые и слишком короткие/длинные
         df = df[df[text_col].str.len() >= self.config.min_text_length]
         df = df[df[text_col].str.len() <= self.config.max_text_length]
         df = df[df[text_col].str.strip().str.len() > 0]
@@ -233,7 +222,7 @@ class TextPreprocessor(BaseAdapter):
         container.data = df
         container.stage = ProcessingStage.CLEANED
         
-        container.add_recommendation({
+        container.recommendations.append({
             "type": "preprocessing",
             "level": self.preprocessing_level,
             "original_count": original_count,
@@ -267,63 +256,48 @@ class TextPreprocessor(BaseAdapter):
         
         # === МИНИМАЛЬНАЯ ОБРАБОТКА ===
         
-        # Декодирование HTML entities
         if self.config.remove_html:
             text = html.unescape(text)
             text = self.HTML_PATTERN.sub(' ', text)
         
-        # Удаление URL
         if self.config.remove_urls:
             text = self.URL_PATTERN.sub(' ', text)
         
-        # Удаление email
         if self.config.remove_emails:
             text = self.EMAIL_PATTERN.sub(' ', text)
         
-        # Нормализация Unicode
         if self.config.fix_unicode:
             text = unicodedata.normalize('NFKC', text)
-            # Удаляем non-printable символы, но оставляем пробелы и переносы
             text = ''.join(char for char in text if char.isprintable() or char in '\n\t ')
         
-        # Нормализация пробелов
         if self.config.normalize_whitespace:
             text = self.WHITESPACE_PATTERN.sub(' ', text)
             text = text.strip()
         
-        # Если минимальный уровень — возвращаем
         if self.preprocessing_level == "minimal":
             return text
         
         # === ПОЛНАЯ ОБРАБОТКА ===
         
-        # Приведение к нижнему регистру
         if self.config.lowercase:
             text = text.lower()
         
-        # Удаление чисел
         if self.config.remove_numbers:
             text = self.NUMBERS_PATTERN.sub(' ', text)
         
-        # Удаление пунктуации
         if self.config.remove_punctuation:
             text = self.PUNCTUATION_PATTERN.sub(' ', text)
         
-        # Токенизация для дальнейшей обработки
         words = text.split()
         
-        # Удаление стоп-слов
         if self.config.remove_stopwords:
             words = [w for w in words if w.lower() not in self.ENGLISH_STOPWORDS]
-        
-        # Лемматизация
+
         if self.config.lemmatize:
             words = self._lemmatize_words(words)
         
-        # Собираем обратно
         text = ' '.join(words)
         
-        # Финальная нормализация пробелов
         text = self.WHITESPACE_PATTERN.sub(' ', text).strip()
         
         return text
@@ -351,10 +325,8 @@ class TextPreprocessor(BaseAdapter):
                     return wordnet.ADV
                 return wordnet.NOUN
             
-            # POS tagging
             tagged = pos_tag(words)
             
-            # Лемматизация с учётом POS
             lemmatized = [
                 self._lemmatizer.lemmatize(word, get_wordnet_pos(tag))
                 for word, tag in tagged

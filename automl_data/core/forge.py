@@ -5,20 +5,18 @@ AutoForge — главный класс библиотеки для автома
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Tuple
-import time
 import logging
 from pathlib import Path
 
 import pandas as pd
 import numpy as np
 
-from .container import DataContainer, DataType, ProcessingStage
-from .pipeline import Pipeline, PipelineResult
+from .container import DataContainer, DataType
+from .pipeline import Pipeline
 from .config import ForgeConfig, TaskType, TextConfig, ImageConfig, TabularConfig
 
-# Табличные адаптеры
 from ..adapters.profiling import ProfilerAdapter
 from ..adapters.feature_cleaner import FeatureCleanerAdapter
 from ..adapters.encoding import EncodingAdapter
@@ -28,17 +26,15 @@ from ..adapters.imputation import ImputationAdapter
 from ..adapters.scaling import ScalingAdapter
 
 
-from ..utils.decorators import timing
-from ..utils.exceptions import ValidationError, ConfigurationError
-from ..utils.dependencies import optional_import
-
+from ..utils.decorators import timing, require_fitted
+from ..utils.exceptions import ValidationError
 
 @dataclass
 class ForgeResult:
     """
     Результат обработки данных.
     
-    Предоставляет удобный API для доступа к обработанным данным,
+    Предоставляет удобный доступ к обработанным данным,
     сплитам и отчётам.
     
     Attributes:
@@ -164,138 +160,7 @@ class ForgeResult:
         
         if self.profile_report is not None and hasattr(self.profile_report, 'to_file'):
             self.profile_report.to_file(str(path))
-        else:
-            self._generate_html_report(path)
-    
-    def _generate_html_report(self, path: Path) -> None:
-        """Генерация простого HTML отчёта"""
-        container = self.container
-        
-        # Шаги обработки
-        steps_html = "".join(
-            f"<tr><td>{i+1}</td><td>{s.name}</td><td>{s.duration_seconds:.2f}s</td></tr>"
-            for i, s in enumerate(container.processing_history)
-        )
-        
-        # Рекомендации
-        recs_html = "".join(
-            f"<li><strong>{r.get('type', 'info')}:</strong> {r}</li>"
-            for r in container.recommendations[:10]
-        )
-        
-        # Распределение классов
-        class_html = ""
-        if container.class_distribution:
-            class_rows = "".join(
-                f"<tr><td>{k}</td><td>{v}</td><td>{v/sum(container.class_distribution.values())*100:.1f}%</td></tr>"
-                for k, v in container.class_distribution.items()
-            )
-            class_html = f"""
-            <h2>📊 Class Distribution</h2>
-            <table>
-                <tr><th>Class</th><th>Count</th><th>Percent</th></tr>
-                {class_rows}
-            </table>
-            """
-        
-        html = f"""
-<!DOCTYPE html>
-<html>
-<head>
-    <title>ML Data Forge Report</title>
-    <style>
-        * {{ box-sizing: border-box; }}
-        body {{ 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            margin: 0; padding: 40px; background: #f5f5f5; color: #333;
-        }}
-        .container {{ max-width: 1000px; margin: 0 auto; }}
-        .card {{ 
-            background: white; border-radius: 12px; padding: 30px; 
-            margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }}
-        h1 {{ color: #e74c3c; margin-bottom: 10px; }}
-        h2 {{ color: #3498db; border-bottom: 2px solid #3498db; padding-bottom: 10px; }}
-        .metrics {{ display: flex; flex-wrap: wrap; gap: 15px; margin: 20px 0; }}
-        .metric {{ 
-            flex: 1; min-width: 150px; padding: 20px; 
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 10px; text-align: center; color: white;
-        }}
-        .metric-value {{ font-size: 28px; font-weight: bold; }}
-        .metric-label {{ opacity: 0.9; margin-top: 5px; }}
-        table {{ width: 100%; border-collapse: collapse; margin: 15px 0; }}
-        th, td {{ padding: 12px; text-align: left; border-bottom: 1px solid #eee; }}
-        th {{ background: #f8f9fa; font-weight: 600; }}
-        tr:hover {{ background: #f8f9fa; }}
-        ul {{ padding-left: 20px; }}
-        li {{ margin: 8px 0; }}
-        .tag {{ 
-            display: inline-block; padding: 4px 12px; margin: 2px;
-            background: #3498db; color: white; border-radius: 15px; font-size: 12px;
-        }}
-        .success {{ background: #27ae60; }}
-        .warning {{ background: #f39c12; }}
-        footer {{ text-align: center; padding: 20px; color: #999; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="card">
-            <h1>🔥 ML Data Forge Report</h1>
-            <p>
-                Data type: <span class="tag">{container.data_type.name}</span>
-                Stage: <span class="tag success">{container.stage.name}</span>
-            </p>
-            
-            <div class="metrics">
-                <div class="metric">
-                    <div class="metric-value">{container.shape[0]:,}</div>
-                    <div class="metric-label">Rows</div>
-                </div>
-                <div class="metric">
-                    <div class="metric-value">{container.shape[1]}</div>
-                    <div class="metric-label">Columns</div>
-                </div>
-                <div class="metric">
-                    <div class="metric-value">{container.quality_score:.0%}</div>
-                    <div class="metric-label">Quality Score</div>
-                </div>
-                <div class="metric">
-                    <div class="metric-value">{self.execution_time:.2f}s</div>
-                    <div class="metric-label">Processing Time</div>
-                </div>
-            </div>
-        </div>
-        
-        <div class="card">
-            <h2>⚙️ Processing Steps</h2>
-            <table>
-                <tr><th>#</th><th>Step</th><th>Duration</th></tr>
-                {steps_html}
-            </table>
-        </div>
-        
-        {class_html}
-        
-        <div class="card">
-            <h2>💡 Recommendations</h2>
-            <ul>{recs_html if recs_html else '<li>No recommendations</li>'}</ul>
-        </div>
-        
-        <div class="card">
-            <h2>📋 Configuration</h2>
-            <pre>{self.config.to_dict()}</pre>
-        </div>
-        
-        <footer>
-            <p>Generated by ML Data Forge v1.0.0</p>
-        </footer>
-    </div>
-</body>
-</html>
-"""
-        path.write_text(html, encoding='utf-8')
+
     
     def get_pipeline_code(self) -> str:
         """Получить воспроизводимый Python код"""
@@ -405,12 +270,11 @@ class AutoForge:
         random_state: int = 42,
         verbose: bool = True,
         
-        
-        # Специфичные конфиги
         text_config: TextConfig | None = None,
         image_config: ImageConfig | None = None,
         tabular_config: TabularConfig | None = None,
 
+        # Текстовые настройки
         text_preprocessing_level: str = "minimal",
         text_remove_html: bool = True,
         text_remove_urls: bool = True,
@@ -429,7 +293,7 @@ class AutoForge:
         text_augment_methods: list[str] | None = None,
         text_balance_classes: bool = False,
 
-        
+        # Настройки изображений
         augment: bool | None = None,
         augment_factor: float | None = None,
         target_size: tuple[int, int] | None = None,
@@ -444,7 +308,6 @@ class AutoForge:
         
         **kwargs
     ):
-        # Создаём базовые конфиги
         if tabular_config is None:
             tabular_config = TabularConfig(
                 impute_strategy=impute_strategy,
@@ -482,8 +345,7 @@ class AutoForge:
         
         if image_config is None:
             image_config = ImageConfig()
-            
-            # Переопределяем параметры изображений, если они переданы
+        
             if augment is not None:
                 image_config.augment = augment
             if augment_factor is not None:
@@ -507,7 +369,6 @@ class AutoForge:
             if use_randaugment is not None:
                 image_config.use_randaugment = use_randaugment
         
-        # Создаём главную конфигурацию
         self.config = ForgeConfig(
             target=target,
             task=TaskType(task) if task != "auto" else TaskType.AUTO,
@@ -527,8 +388,7 @@ class AutoForge:
         self.image_column = image_column
         self.image_dir = Path(image_dir) if image_dir else None
         self.balance_strategy = balance_strategy
-        
-        # Логгер
+
         self._logger = logging.getLogger("automl_data.AutoForge")
         if verbose:
             logging.basicConfig(
@@ -536,8 +396,7 @@ class AutoForge:
                 format='%(asctime)s | %(message)s',
                 datefmt='%H:%M:%S'
             )
-        
-        # Внутреннее состояние
+
         self._pipeline: Pipeline | None = None
         self._profiler: ProfilerAdapter | None = None
         self._is_fitted = False
@@ -546,14 +405,10 @@ class AutoForge:
     def fit(self, data: pd.DataFrame | DataContainer) -> AutoForge:
         """
         Анализ данных и настройка пайплайна.
-        
-        Args:
-            data: DataFrame или DataContainer с данными
-        
+                
         Returns:
             self (для цепочки вызовов)
         """
-        # Создаём контейнер
         if isinstance(data, pd.DataFrame):
             container = DataContainer(
                 data=data.copy(),
@@ -571,19 +426,15 @@ class AutoForge:
         
         self._log(f"🔍 Analyzing data: {container.shape[0]:,} rows × {container.shape[1]} columns")
         
-        # Валидация
         self._validate_input(container)
         
-        # Определяем тип данных
         self._data_type = container.data_type
         self._log(f"📋 Data type: {self._data_type.name}")
         
-        # Определяем тип задачи
         if self.config.task == TaskType.AUTO:
             self.config.task = self._infer_task(container)
             self._log(f"📋 Detected task: {self.config.task.value}")
         
-        # Профилирование (опционально)
         if self.config.verbose:
             try:
                 self._profiler = ProfilerAdapter(minimal=True)
@@ -595,27 +446,19 @@ class AutoForge:
             except Exception:
                 pass
         
-        # Строим пайплайн
         self._pipeline = self._build_pipeline(container)
-        self._log(f"✅ Pipeline ready with {len(self._pipeline)} steps")
+        self._log(f"Pipeline ready with {len(self._pipeline)} steps")
         
         self._is_fitted = True
         return self
     
+    @timing
+    @require_fitted
     def transform(self, data: pd.DataFrame | DataContainer) -> ForgeResult:
         """
         Применение пайплайна к данным.
-        
-        Args:
-            data: DataFrame или DataContainer
-        
-        Returns:
-            ForgeResult с обработанными данными
         """
-        if not self._is_fitted:
-            raise RuntimeError("AutoForge must be fitted first. Call fit() or fit_transform().")
-        
-        # Создаём контейнер
+
         if isinstance(data, pd.DataFrame):
             container = DataContainer(
                 data=data.copy(),
@@ -626,23 +469,15 @@ class AutoForge:
             )
         else:
             container = data.clone()
-        
-        start_time = time.time()
-        self._log("🚀 Transforming data...")
-        
-        # Выполняем пайплайн
-        result = self._pipeline.execute(container)
-        
+    
+        self._log("Transforming data...")
+        result = self._pipeline.execute(container)        
         if not result.success and result.errors:
-            self._log(f"⚠️ Pipeline completed with errors: {result.errors}")
-        
-        # Вычисляем quality score
+            self._log(f"Pipeline completed with errors: {result.errors}")
         quality_score = self._calculate_quality(result.container)
         result.container.quality_score = quality_score
-        
-        execution_time = time.time() - start_time
-        
-        self._log(f"✨ Done! Shape: {result.container.shape}, Quality: {quality_score:.0%}, Time: {execution_time:.2f}s")
+        execution_time = getattr(self.transform, 'last_execution_time', 0.0)
+        self._log(f"Done! Shape: {result.container.shape}, Quality: {quality_score:.0%}, Time: {execution_time:.2f}s")
         
         return ForgeResult(
             container=result.container,
@@ -654,14 +489,7 @@ class AutoForge:
     def fit_transform(self, data: pd.DataFrame | DataContainer) -> ForgeResult:
         """
         Анализ и обработка данных в одном вызове.
-        
         Это основной метод для большинства случаев.
-        
-        Args:
-            data: DataFrame или DataContainer
-        
-        Returns:
-            ForgeResult с обработанными данными
         """
         return self.fit(data).transform(data)
     
@@ -717,7 +545,6 @@ class AutoForge:
             on_error="warn"
         )
         
-        # 1. Imputation (только заполнение пропусков)
         pipeline.add_step(
             ImputationAdapter(
                 strategy=cfg.impute_strategy,
@@ -728,7 +555,6 @@ class AutoForge:
             on_error="warn"
         )
         
-        # 2. Outliers (на импьютированных данных)
         if cfg.outlier_method != "none":
             pipeline.add_step(
                 OutlierAdapter(
@@ -739,7 +565,6 @@ class AutoForge:
                 on_error="warn"
             )
         
-        # 3. Encoding (кодирование категориальных)
         if container.categorical_columns:
             pipeline.add_step(
                 EncodingAdapter(
@@ -751,7 +576,6 @@ class AutoForge:
                 on_error="warn"
             )
         
-        # 4. Scaling (масштабирование ПОСЛЕ encoding)
         if cfg.scaling != "none":
             pipeline.add_step(
                 ScalingAdapter(
@@ -761,7 +585,6 @@ class AutoForge:
                 on_error="warn"
             )
         
-        # 5. Balancing (балансировка классов)
         if self.config.balance and self.config.task == TaskType.CLASSIFICATION:
             pipeline.add_step(
                 BalancingAdapter(
@@ -782,7 +605,6 @@ class AutoForge:
         
         cfg = self.config.text
         
-        # 1. Препроцессинг
         pipeline.add_step(
             TextPreprocessor(
                 config=cfg,
@@ -791,7 +613,6 @@ class AutoForge:
             name="TextPreprocessing"
         )
         
-        # 2. Аугментация (если нужна)
         augment_needed = (
             cfg.augment or 
             (self.config.balance and container.is_imbalanced) or
@@ -819,13 +640,11 @@ class AutoForge:
         
         cfg = self.config.image
         
-        # 1. Preprocessing
         pipeline.add_step(
             ImagePreprocessor(config=cfg),
             name="ImagePreprocessing"
         )
         
-        # 2. Augmentation
         # Условия для аугментации:
         # A) Пользователь явно запросил аугментацию (cfg.augment=True)
         # B) Нужна балансировка через аугментацию
@@ -838,7 +657,7 @@ class AutoForge:
         )
         
         if explicit_augment or balance_augment:
-            self._log(f"🔄 Adding augmentation: explicit={explicit_augment}, balance={balance_augment}")
+            self._log(f"Adding augmentation: explicit={explicit_augment}, balance={balance_augment}")
             
             pipeline.add_step(
                 ImageAugmentor(
@@ -852,7 +671,7 @@ class AutoForge:
             )
         else:
             if cfg.augment:
-                self._log(f"⚠️ Augmentation requested but skipped: "
+                self._log(f"Augmentation requested but skipped: "
                         f"augment_factor={cfg.augment_factor}, "
                         f"balance={self.config.balance}, "
                         f"is_imbalanced={container.is_imbalanced}")
@@ -863,11 +682,7 @@ class AutoForge:
     def _calculate_quality(self, container: DataContainer) -> float:
         """Расчёт качества данных"""
         df = container.data
-        
-        # 1. Полнота (нет пропусков)
         completeness = 1 - df.isnull().mean().mean()
-        
-        # 2. Уникальность строк
         try:
             uniqueness = 1 - (df.duplicated().sum() / max(1, len(df)))
         except TypeError:
@@ -877,13 +692,11 @@ class AutoForge:
         # 3. Консистентность типов
         numeric_ratio = len(container.numeric_columns) / max(1, len(container.columns))
         
-        # 4. Баланс классов (если применимо)
         balance_score = 1.0
         if container.class_distribution and len(container.class_distribution) >= 2:
             counts = list(container.class_distribution.values())
             balance_score = min(counts) / max(counts)
         
-        # Взвешенная оценка
         score = (
             0.35 * completeness +
             0.25 * uniqueness +

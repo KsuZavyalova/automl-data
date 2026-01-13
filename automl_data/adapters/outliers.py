@@ -16,7 +16,6 @@ from ..utils.dependencies import require_package
 
 class OutlierAdapter(BaseAdapter):
     """
-    Адаптер для PyOD.
     Автоматическое обнаружение и обработка выбросов.
     """
     
@@ -31,6 +30,7 @@ class OutlierAdapter(BaseAdapter):
         self.method = method
         self.contamination = contamination
         self.action = action
+        self._fit_info = {}
         
         self._detector = None
         self._numeric_columns: list[str] = []
@@ -53,9 +53,7 @@ class OutlierAdapter(BaseAdapter):
         if len(numeric_data) < 10:
             return
         
-        # Выбор метода
         if self.method == "auto":
-            # ECOD быстрый и эффективный
             self._detector = ECOD(contamination=self.contamination)
         elif self.method == "iforest":
             self._detector = IForest(
@@ -67,11 +65,19 @@ class OutlierAdapter(BaseAdapter):
         
         self._detector.fit(numeric_data)
         
-        # Вычисляем границы для clipping
         for col in self._numeric_columns:
             q1, q3 = df[col].quantile([0.25, 0.75])
             iqr = q3 - q1
             self._bounds[col] = (q1 - 1.5 * iqr, q3 + 1.5 * iqr)
+
+        self._fit_info.update({
+            "detector": self._detector.__class__.__name__, 
+            "method": self.method,
+            "action": self.action,
+            "n_samples": len(container.data),
+            "n_features": len(container.numeric_columns)
+        })
+
     
     def _transform_impl(self, container: DataContainer) -> DataContainer:
         if not self._detector or not self._numeric_columns:
@@ -82,7 +88,6 @@ class OutlierAdapter(BaseAdapter):
             df[self._numeric_columns].median()
         )
         
-        # Предсказываем выбросы
         predictions = self._detector.predict(numeric_data)
         outlier_mask = predictions == 1
         outlier_count = outlier_mask.sum()
@@ -90,7 +95,6 @@ class OutlierAdapter(BaseAdapter):
         if outlier_count == 0:
             return container
         
-        # Применяем действие
         match self.action:
             case "remove":
                 df = df[~outlier_mask]

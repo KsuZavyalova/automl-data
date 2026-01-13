@@ -1,7 +1,6 @@
 # automl_data/adapters/feature_cleaner.py
 """
 Удаление очевидно бесполезных признаков.
-Использует простые, но эффективные эвристики.
 """
 
 from __future__ import annotations
@@ -57,10 +56,8 @@ class FeatureCleanerAdapter(BaseAdapter):
     def _fit_impl(self, container: DataContainer) -> None:
         df = container.data
         
-        # Анализ признаков
         analysis = self._analyze_features(df, container.target_column)
         
-        # Определяем признаки для удаления
         self._cols_to_remove = []
         removal_reasons = {}
         
@@ -96,13 +93,11 @@ class FeatureCleanerAdapter(BaseAdapter):
                         self._cols_to_remove.append(col)
                         removal_reasons[col] = "duplicate_feature"
         
-        # 5. Высококоррелированные (опционально)
+        # 5. Высококоррелированные 
         if analysis["high_corr_pairs"]:
-            # Удаляем один из каждой высококоррелированной пары
             removed_in_corr = set()
             for col1, col2 in analysis["high_corr_pairs"]:
                 if col1 not in removed_in_corr and col2 not in removed_in_corr:
-                    # Удаляем тот, у которого больше пропусков или меньше уникальных значений
                     if (df[col1].isnull().mean() > df[col2].isnull().mean() or
                         df[col1].nunique() < df[col2].nunique()):
                         col_to_remove = col1
@@ -194,10 +189,8 @@ class FeatureCleanerAdapter(BaseAdapter):
             if series.dtype == 'object' or series.dtype == 'string':
                 sample = series.dropna().iloc[0] if len(series.dropna()) > 0 else ""
                 if isinstance(sample, str):
-                    # Проверка на GUID/UUID
                     if len(sample) == 36 and '-' in sample:
                         return True
-                    # Проверка на email
                     if '@' in sample and '.' in sample:
                         return True
             
@@ -220,7 +213,6 @@ class FeatureCleanerAdapter(BaseAdapter):
                 if col2 in processed:
                     continue
                 
-                # Проверяем на равенство значений
                 if df[col1].equals(df[col2]):
                     duplicates.append(col2)
                     processed.add(col2)
@@ -237,16 +229,13 @@ class FeatureCleanerAdapter(BaseAdapter):
         
         df = container.data.copy()
         
-        # Удаляем признаки
         cols_to_keep = [col for col in df.columns if col not in self._cols_to_remove]
         df_cleaned = df[cols_to_keep].copy()
         
-        # Обновляем контейнер
         container.data = df_cleaned
         container._sync_internal_state()
         container.stage = ProcessingStage.CLEANED
         
-        # Добавляем рекомендации
         container.recommendations.append({
             "type": "feature_cleaning",
             "removed_count": len(self._cols_to_remove),

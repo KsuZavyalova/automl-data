@@ -40,7 +40,7 @@ class TextConfig:
     """
     
     # Уровень предобработки
-    preprocessing_level: str = "minimal"  # "minimal" или "full"
+    preprocessing_level: str = "full"  # "minimal" или "full"
     
     # === Минимальная предобработка (для трансформеров) ===
     remove_html: bool = True
@@ -64,15 +64,11 @@ class TextConfig:
     augment: bool = False
     augment_factor: float = 2.0  # Во сколько раз увеличить датасет
     
-    # Доступные методы:
-    # - "eda": Easy Data Augmentation (synonym, swap, delete, insert)
-    # - "t5_paraphrase": Перефразирование через T5
-    # - "synonym_wordnet": Замена синонимами из WordNet
-    # - "pronoun_to_noun": Замена местоимений на существительные
     augment_methods: List[str] = field(default_factory=lambda: [
         "eda",
         "synonym_wordnet",
-        "pronoun_to_noun"
+        "pronoun_to_noun",
+        "t5_paraphrase"
     ])
     
     # EDA параметры
@@ -87,7 +83,6 @@ class TextConfig:
     t5_num_beams: int = 4
     t5_max_length: int = 256
     
-    # === Балансировка классов ===
     balance_classes: bool = False  # Балансировать через аугментацию
     imbalance_threshold: float = 0.3  # Порог дисбаланса (min/max ratio)
     
@@ -108,7 +103,6 @@ class TextConfig:
                     f"Valid methods: {valid_methods}"
                 )
         
-        # Убираем дубликаты
         self.augment_methods = list(dict.fromkeys(self.augment_methods))
         
         if self.augment_factor < 1.0:

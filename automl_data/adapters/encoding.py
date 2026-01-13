@@ -64,10 +64,8 @@ class EncodingAdapter(BaseAdapter):
         df = container.data
         target = container.target_column or self.target_column
         
-        # Определяем колонки для кодирования
         self._columns_to_encode = container.categorical_columns.copy()
         
-        # Исключаем target
         if target and target in self._columns_to_encode:
             self._columns_to_encode.remove(target)
         
@@ -78,7 +76,6 @@ class EncodingAdapter(BaseAdapter):
         for col in self._columns_to_encode:
             n_unique = df[col].nunique()
             
-            # Выбор стратегии
             if self.strategy == "auto":
                 if n_unique == 2:
                     strat = "binary"
@@ -93,7 +90,6 @@ class EncodingAdapter(BaseAdapter):
             
             self._strategies[col] = strat
             
-            # Создаём энкодер
             try:
                 if strat == "onehot":
                     encoder = ce.OneHotEncoder(
@@ -138,7 +134,6 @@ class EncodingAdapter(BaseAdapter):
                 self._encoders[col] = encoder
                 
             except Exception as e:
-                # Fallback to ordinal
                 encoder = ce.OrdinalEncoder(
                     cols=[col],
                     handle_unknown="value",
@@ -155,7 +150,6 @@ class EncodingAdapter(BaseAdapter):
         if not self._encoders:
             return container
     
-        # 1. Сохраняем target
         target = container.target_column or self.target_column
         target_series = None
         if target and target in container.data.columns:
@@ -163,7 +157,6 @@ class EncodingAdapter(BaseAdapter):
         
         df = container.data.copy()
 
-        df = container.data.copy()
         target = container.target_column or self.target_column
         
         for col, encoder in self._encoders.items():
@@ -173,22 +166,18 @@ class EncodingAdapter(BaseAdapter):
             strat = self._strategies.get(col, "ordinal")
             
             try:
-                # Transform
                 if strat in ["target", "woe"] and target and target in df.columns:
                     encoded = encoder.transform(df[[col]])
                 else:
                     encoded = encoder.transform(df[[col]])
                 
-                # Удаляем оригинальную колонку
                 df = df.drop(columns=[col])
                 
-                # Добавляем закодированные
                 for new_col in encoded.columns:
                     if new_col not in df.columns:
                         df[new_col] = encoded[new_col].values
             
             except Exception as e:
-                # При ошибке оставляем как есть
                 container.recommendations.append({
                     "type": "encoding_warning",
                     "column": col,
@@ -197,19 +186,15 @@ class EncodingAdapter(BaseAdapter):
         
         if target_series is not None:
             if target not in df.columns:
-                # Добавляем target обратно (если удалили)
                 df[target] = target_series.values
             else:
-                # Проверяем, что target не изменился
                 current_target = df[target]
                 if hasattr(current_target, 'values'):
                     if not np.array_equal(current_target.values, target_series.values):
                         df[target] = target_series.values
         
-        # 3. Обновляем данные
         container.data = df
         
-        # 4. ВЫЗЫВАЕМ СИНХРОНИЗАЦИЮ!
         container._sync_internal_state()
         
         container.stage = ProcessingStage.TRANSFORMED

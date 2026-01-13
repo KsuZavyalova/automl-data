@@ -71,12 +71,10 @@ class Pipeline:
             condition = step["condition"]
             on_error = step["on_error"]
             
-            # Проверка условия
             if condition and not condition(result.container):
                 self._log(f"Skipping {step_name}")
                 continue
             
-            # Выполнение
             try:
                 self._log(f"Executing: {step_name}")
                 step_start = time.time()

@@ -239,3 +239,130 @@ class TransformError(MLDataForgeError):
             self.details["transformer"] = transformer
         if column:
             self.details["column"] = column
+
+
+class OutlierDetectionError(MLDataForgeError):
+    """Ошибка детектирования выбросов"""
+    
+    def __init__(
+        self,
+        message: str,
+        method: str | None = None,
+        contamination: float | None = None
+    ):
+        super().__init__(
+            message,
+            code="OUTLIER_ERROR",
+            suggestion="Check outlier detection parameters and input data"
+        )
+        self.method = method
+        self.contamination = contamination
+        
+        if method:
+            self.details["method"] = method
+        if contamination is not None:
+            self.details["contamination"] = contamination
+
+
+class ImputationError(MLDataForgeError):
+    """Ошибка импьютации"""
+    
+    def __init__(
+        self,
+        message: str,
+        strategy: str | None = None,
+        column: str | None = None,
+        missing_ratio: float | None = None
+    ):
+        super().__init__(
+            message,
+            code="IMPUTATION_ERROR",
+            suggestion="Try a different imputation strategy or handle missing values manually"
+        )
+        self.strategy = strategy
+        self.column = column
+        self.missing_ratio = missing_ratio
+        
+        if strategy:
+            self.details["strategy"] = strategy
+        if column:
+            self.details["column"] = column
+        if missing_ratio is not None:
+            self.details["missing_ratio"] = missing_ratio
+
+
+class ScalingError(MLDataForgeError):
+    """Ошибка масштабирования"""
+    
+    def __init__(
+        self,
+        message: str,
+        strategy: str | None = None,
+        column: str | None = None
+    ):
+        super().__init__(
+            message,
+            code="SCALING_ERROR",
+            suggestion="Check if data contains valid numerical values for scaling"
+        )
+        self.strategy = strategy
+        self.column = column
+        
+        if strategy:
+            self.details["strategy"] = strategy
+        if column:
+            self.details["column"] = column
+
+
+class EncodingError(MLDataForgeError):
+    """Ошибка кодирования"""
+    
+    def __init__(
+        self,
+        message: str,
+        strategy: str | None = None,
+        column: str | None = None,
+        cardinality: int | None = None
+    ):
+        super().__init__(
+            message,
+            code="ENCODING_ERROR",
+            suggestion="Check categorical columns and encoding strategy"
+        )
+        self.strategy = strategy
+        self.column = column
+        self.cardinality = cardinality
+        
+        if strategy:
+            self.details["strategy"] = strategy
+        if column:
+            self.details["column"] = column
+        if cardinality is not None:
+            self.details["cardinality"] = cardinality
+
+
+class BalancingError(MLDataForgeError):
+    """Ошибка балансировки классов"""
+    
+    def __init__(
+        self,
+        message: str,
+        strategy: str | None = None,
+        target_column: str | None = None,
+        imbalance_ratio: float | None = None
+    ):
+        super().__init__(
+            message,
+            code="BALANCING_ERROR",
+            suggestion="Check class distribution and balancing parameters"
+        )
+        self.strategy = strategy
+        self.target_column = target_column
+        self.imbalance_ratio = imbalance_ratio
+        
+        if strategy:
+            self.details["strategy"] = strategy
+        if target_column:
+            self.details["target_column"] = target_column
+        if imbalance_ratio is not None:
+            self.details["imbalance_ratio"] = imbalance_ratio

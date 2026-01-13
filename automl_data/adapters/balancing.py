@@ -45,8 +45,10 @@ class BalancingAdapter(BaseAdapter):
     ):
         super().__init__(name="Balancing", **kwargs)
         self.strategy = strategy
+        self._actual_strategy = None
         self.target_column = target_column
         self.imbalance_threshold = imbalance_threshold
+        self._actual_strategy = None
         self.sampling_strategy = sampling_strategy
         self.random_state = random_state
         self.n_jobs = n_jobs
@@ -71,7 +73,6 @@ class BalancingAdapter(BaseAdapter):
         
         y = container.data[target]
         
-        # Проверяем распределение классов
         class_counts = y.value_counts()
         self._original_distribution = class_counts.to_dict()
         
@@ -79,7 +80,6 @@ class BalancingAdapter(BaseAdapter):
             self._fit_info = {"status": "skipped", "reason": "single class"}
             return
         
-        # Проверяем степень дисбаланса
         min_ratio = class_counts.min() / class_counts.max()
         
         if min_ratio >= self.imbalance_threshold:
@@ -159,7 +159,7 @@ class BalancingAdapter(BaseAdapter):
                 sampling_strategy=self.sampling_strategy,
                 random_state=self.random_state
             )
-            strategy = "random_over (fallback)"
+            strategy = "random_over"
         
         self._fit_info = {
             "status": "ready",
@@ -175,11 +175,9 @@ class BalancingAdapter(BaseAdapter):
         target = container.target_column or self.target_column
         df = container.data.copy()
         
-        # Разделяем на X и y
         X = df.drop(columns=[target])
         y = df[target]
         
-        # Сохраняем имена колонок
         columns = X.columns.tolist()
         
         # Обрабатываем категориальные колонки для SMOTE
@@ -187,14 +185,12 @@ class BalancingAdapter(BaseAdapter):
         categorical_cols = X.select_dtypes(include=['object', 'category']).columns.tolist()
         
         if categorical_cols:
-            # Временно кодируем категории
             X_encoded = X.copy()
             encodings = {}
             
             for col in categorical_cols:
                 X_encoded[col], encodings[col] = pd.factorize(X[col])
             
-            # Применяем балансировку
             try:
                 X_resampled, y_resampled = self._sampler.fit_resample(X_encoded, y)
             except Exception as e:
@@ -204,14 +200,12 @@ class BalancingAdapter(BaseAdapter):
                 })
                 return container
             
-            # Декодируем обратно
             X_result = pd.DataFrame(X_resampled, columns=columns)
             for col in categorical_cols:
                 # Округляем индексы и маппим обратно
                 indices = X_result[col].round().astype(int).clip(0, len(encodings[col]) - 1)
                 X_result[col] = pd.Categorical.from_codes(indices, categories=encodings[col])
         else:
-            # Только числовые данные
             try:
                 X_resampled, y_resampled = self._sampler.fit_resample(X, y)
                 X_result = pd.DataFrame(X_resampled, columns=columns)
@@ -222,11 +216,9 @@ class BalancingAdapter(BaseAdapter):
                 })
                 return container
         
-        # Собираем результат
         df_resampled = X_result.copy()
         df_resampled[target] = y_resampled
         
-        # Обновляем распределение
         self._new_distribution = pd.Series(y_resampled).value_counts().to_dict()
         
         container.data = df_resampled.reset_index(drop=True)

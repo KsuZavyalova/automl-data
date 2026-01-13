@@ -27,10 +27,7 @@ print(f"Пропуски: {df.isnull().sum().sum()}")
 # 2. Создаем AutoForge
 print("\n🔧 Создание AutoForge...")
 forge = AutoForge(
-    target=target,
-    task="auto", 
-    balance=True,
-    verbose=True
+    target=target
 )
 
 # 3. Обрабатываем данные (fit + transform в одном вызове)

@@ -13,7 +13,7 @@ import numpy as np
 from .base import BaseAdapter
 from ..core.container import DataContainer, ProcessingStage
 from ..utils.dependencies import require_package
-
+from ..utils.exceptions import ImputationError
 
 class ImputationAdapter(BaseAdapter):
     """
@@ -42,6 +42,7 @@ class ImputationAdapter(BaseAdapter):
     ):
         super().__init__(name="Imputation", **config)
         self.strategy = strategy
+        self._actual_strategy = None
         self.numeric_strategy = numeric_strategy
         self.categorical_strategy = categorical_strategy
         self.constant_value = constant_value
@@ -59,11 +60,9 @@ class ImputationAdapter(BaseAdapter):
     def _fit_impl(self, container: DataContainer) -> None:
         df = container.data
         
-        # Определяем колонки
         self._numeric_cols = container.numeric_columns.copy()
         self._categorical_cols = container.categorical_columns.copy()
         
-        # Исключаем target
         target_col = container.target_column
         if target_col:
             if target_col in self._numeric_cols:
@@ -71,13 +70,13 @@ class ImputationAdapter(BaseAdapter):
             if target_col in self._categorical_cols:
                 self._categorical_cols.remove(target_col)
         
-        # Анализ пропусков
         missing_info = self._analyze_missingness(df)
         
-        # Автовыбор стратегии
         if self.strategy == "auto":
-            self.strategy = self._select_best_strategy(missing_info, df)
-        
+            self._actual_strategy = self._select_best_strategy(missing_info, df)
+        else:
+            self._actual_strategy = self.strategy
+            
         self._fit_info.update({
             "strategy": self.strategy,
             "missing_info": missing_info,
@@ -85,7 +84,6 @@ class ImputationAdapter(BaseAdapter):
             "categorical_cols_count": len(self._categorical_cols)
         })
         
-        # Fit импьютера
         if self.strategy != "none":
             self._fit_imputer(df)
     
@@ -178,7 +176,6 @@ class ImputationAdapter(BaseAdapter):
         if self.strategy == "none":
             return container
         
-        # Сохраняем target
         target_col = container.target_column
         original_target = None
         if target_col and target_col in container.data.columns:
@@ -197,17 +194,14 @@ class ImputationAdapter(BaseAdapter):
             if col in df.columns and df[col].isnull().any():
                 df[col] = df[col].fillna(fill_value)
         
-        # Восстанавливаем target
         if original_target is not None and target_col in df.columns:
             if not np.array_equal(df[target_col].values, original_target.values):
                 df[target_col] = original_target.values
         
-        # Обновляем контейнер
         container.data = df
         container._sync_internal_state()
         container.stage = ProcessingStage.IMPUTED
         
-        # Добавляем рекомендации
         container.recommendations.append({
             "type": "imputation",
             "strategy": self.strategy,
@@ -225,11 +219,9 @@ class ImputationAdapter(BaseAdapter):
         total_cells = df.shape[0] * df.shape[1]
         missing_ratio = total_missing / total_cells
         
-        # Колонки с пропусками
         missing_by_col = missing_matrix.sum()
         cols_with_missing = missing_by_col[missing_by_col > 0].index.tolist()
-        
-        # Тип пропусков (MCAR/MAR/MNAR грубая оценка)
+    
         missing_type = "MCAR" if missing_ratio < 0.05 else "MAR/MNAR"
         
         return {
